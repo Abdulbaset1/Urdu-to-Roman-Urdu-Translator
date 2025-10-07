@@ -49,7 +49,8 @@ st.markdown("""
     .roman-text {
         font-size: 1.5rem;
         font-family: 'Courier New', monospace;
-        color: #d62728;
+        color: #000000;
+        font-weight: bold;
     }
     .download-progress {
         margin: 10px 0;
@@ -95,7 +96,6 @@ def download_model_file():
             st.error("❌ Failed to download model file")
             return False
     else:
-        st.info("✅ Model file already exists")
         return True
 
 def download_vocab_files():
@@ -128,7 +128,6 @@ def download_vocab_files():
                 return False
         else:
             success_count += 1
-            st.info(f"✅ {file_path} already exists")
     
     return success_count == len(vocab_files)
 
@@ -161,38 +160,44 @@ def check_required_files():
     
     return missing_files
 
+def setup_files():
+    """Download all required files only once"""
+    # Check if all files already exist
+    missing_files = check_required_files()
+    if not missing_files:
+        return True
+    
+    st.warning("⚠️ Setting up required files for the first time...")
+    
+    # Download model file
+    model_success = download_model_file()
+    if not model_success:
+        return False
+    
+    # Download vocabulary files
+    vocab_success = download_vocab_files()
+    if not vocab_success:
+        return False
+    
+    # Final check
+    missing_files = check_required_files()
+    if missing_files:
+        st.error("❌ Failed to download all required files")
+        return False
+    
+    return True
+
 @st.cache_resource
 def load_model():
-    """Load the trained model with caching"""
+    """Load the trained model with caching - this runs only once"""
     try:
-        # Download all required files
-        st.info("🚀 Setting up the transliteration model...")
-        
-        # Download model file
-        model_success = download_model_file()
-        if not model_success:
-            st.error("❌ Failed to download model file")
-            return None
-        
-        # Download vocabulary files
-        vocab_success = download_vocab_files()
-        if not vocab_success:
-            st.error("❌ Failed to setup vocabulary files")
-            return None
-        
-        # Check if all files exist
-        missing_files = check_required_files()
-        if missing_files:
-            st.error("❌ Still missing files after download:")
-            for file in missing_files:
-                st.write(f"- {file}")
+        # Setup files first
+        if not setup_files():
             return None
         
         # Verify vocab files can be read
         vocab_ok, ur_size, en_size = check_vocab_files()
-        if vocab_ok:
-            st.success(f"✅ Vocabulary files loaded: Urdu({ur_size} chars), English({en_size} chars)")
-        else:
+        if not vocab_ok:
             st.error("❌ Failed to read vocabulary files")
             return None
         
@@ -205,7 +210,7 @@ def load_model():
                 device='cuda' if torch.cuda.is_available() else 'cpu'
             )
         
-        st.success("✅ Model loaded successfully!")
+        st.success("✅ Model loaded successfully! Ready for transliteration.")
         return model
         
     except Exception as e:
@@ -216,26 +221,13 @@ def main():
     # Header
     st.markdown('<h1 class="main-header">🕌 Urdu to Roman Urdu Transliterator</h1>', unsafe_allow_html=True)
     
-    # Check for required files and download if missing
-    missing_files = check_required_files()
+    # Load model only once when app starts
+    model = load_model()
     
-    if missing_files:
-        st.warning("⚠️ Some files are missing. Downloading automatically...")
-        
-        # Show what's missing
-        st.write("**Missing files:**")
-        for file in missing_files:
-            st.write(f"- {file}")
-        
-        # Download all missing files
-        load_model()
-        
-        # Check again after download attempt
-        missing_files = check_required_files()
-        if missing_files:
-            st.error("❌ Failed to download all required files. Please check your internet connection.")
-            return
-    
+    if model is None:
+        st.error("❌ Failed to load the model. Please check your internet connection and try again.")
+        return
+
     # Sidebar
     with st.sidebar:
         st.markdown("### ℹ️ About")
@@ -262,18 +254,15 @@ def main():
         st.markdown("### ✅ File Status")
         st.success("All required files are present!")
         
-        # Vocabulary info
-        try:
-            vocab_ok, ur_size, en_size = check_vocab_files()
-            if vocab_ok:
-                st.write(f"**Urdu Vocab Size:** {ur_size}")
-                st.write(f"**English Vocab Size:** {en_size}")
-                
-                # Show file sizes
-                model_size = os.path.getsize('best_model.pth') / (1024 * 1024)
-                st.write(f"**Model Size:** {model_size:.1f} MB")
-        except:
-            st.write("**File info:** Unable to read")
+        # Quick test button
+        st.markdown("---")
+        if st.button("🧪 Quick Test", key="test_button"):
+            try:
+                test_input = "تم"
+                test_output = model.transliterate(test_input)
+                st.success(f"Test: '{test_input}' → '{test_output}'")
+            except Exception as e:
+                st.error(f"Test failed: {str(e)}")
 
     # Main content
     col1, col2 = st.columns([1, 1])
@@ -315,13 +304,6 @@ def main():
         </div>
         """, unsafe_allow_html=True)
 
-    # Load model
-    model = load_model()
-    
-    if model is None:
-        st.error("❌ Failed to load the model. Please check the errors above.")
-        return
-
     # Process transliteration when button is clicked
     if transliterate_btn and urdu_text.strip():
         with st.spinner("🔄 Transliterating..."):
@@ -342,7 +324,7 @@ def main():
                         <h4>📤 Output (Roman Urdu):</h4>
                         <div class="roman-text">{roman_output}</div>
                         <br>
-                        <small>⏱️ Processed in {processing_time:.2f} seconds</small>
+                        <small>⏱️ Processed in {processing_time:.3f} seconds</small>
                     </div>
                     """, unsafe_allow_html=True)
                 
@@ -354,38 +336,6 @@ def main():
     
     elif transliterate_btn and not urdu_text.strip():
         st.warning("⚠️ Please enter some Urdu text to transliterate.")
-    
-    # Example section
-    st.markdown("---")
-    st.markdown('<h3 class="sub-header">📚 Examples</h3>', unsafe_allow_html=True)
-    
-    examples_col1, examples_col2, examples_col3 = st.columns(3)
-    
-    example_pairs = [
-        ("تم کون ہو", "tum kaun ho"),
-        ("میں ٹھیک ہوں", "main theek hoon"),
-        ("آپ کا نام کیا ہے", "aap ka naam kya hai")
-    ]
-    
-    for i, (urdu, roman) in enumerate(example_pairs):
-        with [examples_col1, examples_col2, examples_col3][i]:
-            st.markdown(f"""
-            <div style="background-color: #f8f9fa; padding: 1rem; border-radius: 10px; text-align: center;">
-                <div class="urdu-text" style="font-size: 1.2rem;">{urdu}</div>
-                <div class="roman-text" style="font-size: 1rem;">{roman}</div>
-            </div>
-            """, unsafe_allow_html=True)
-
-    # Quick test section
-    with st.sidebar:
-        st.markdown("---")
-        if st.button("🧪 Quick Test", key="test_button"):
-            try:
-                test_input = "تم"
-                test_output = model.transliterate(test_input)
-                st.success(f"Test: '{test_input}' → '{test_output}'")
-            except Exception as e:
-                st.error(f"Test failed: {str(e)}")
 
     # Footer
     st.markdown("---")
