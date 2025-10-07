@@ -4,6 +4,7 @@ from model import TransliterationModel
 import time
 import os
 import requests
+import urllib.request
 
 # Page configuration
 st.set_page_config(
@@ -50,41 +51,100 @@ st.markdown("""
         font-family: 'Courier New', monospace;
         color: #d62728;
     }
+    .download-progress {
+        margin: 10px 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-def download_vocab_files():
-    """Download vocabulary files from GitHub using direct raw URLs"""
-    # Create directory
-    os.makedirs('trainingData', exist_ok=True)
+def download_with_progress(url, filename):
+    """Download file with progress bar"""
+    def progress_hook(block_num, block_size, total_size):
+        downloaded = block_num * block_size
+        if total_size > 0:
+            percent = min(100, (downloaded * 100) // total_size)
+            progress_bar.progress(percent)
+            status_text.text(f"Downloading... {percent}% ({downloaded//1024}KB/{total_size//1024}KB)")
     
-    # GitHub raw URLs (direct download)
+    try:
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        urllib.request.urlretrieve(url, filename, reporthook=progress_hook)
+        
+        progress_bar.empty()
+        status_text.empty()
+        return True
+    except Exception as e:
+        st.error(f"Download failed: {str(e)}")
+        return False
+
+def download_model_file():
+    """Download the model file from GitHub releases"""
+    model_url = "https://github.com/Abdulbaset1/Urdu-to-Roman-Urdu-Translator/releases/download/v.1/best_model.pth"
+    model_path = "best_model.pth"
+    
+    if not os.path.exists(model_path):
+        st.info("📥 Downloading trained model (best_model.pth)...")
+        st.warning("This may take a while as the model file is large (~50MB)")
+        
+        if download_with_progress(model_url, model_path):
+            st.success("✅ Model downloaded successfully!")
+            return True
+        else:
+            st.error("❌ Failed to download model file")
+            return False
+    else:
+        st.info("✅ Model file already exists")
+        return True
+
+def download_vocab_files():
+    """Download vocabulary files from GitHub using raw URLs"""
     vocab_files = {
         'trainingData/ur_vocab.txt': 'https://raw.githubusercontent.com/Abdulbaset1/Urdu-to-Roman-Urdu-Translator/main/ur_vocab.txt',
         'trainingData/en_vocab.txt': 'https://raw.githubusercontent.com/Abdulbaset1/Urdu-to-Roman-Urdu-Translator/main/en_vocab.txt'
     }
     
-    downloaded_files = []
+    # Create trainingData directory if it doesn't exist
+    os.makedirs('trainingData', exist_ok=True)
+    
+    success_count = 0
     
     for file_path, url in vocab_files.items():
         if not os.path.exists(file_path):
             try:
                 st.info(f"📥 Downloading {file_path}...")
                 response = requests.get(url)
-                response.raise_for_status()  # Check for HTTP errors
+                response.raise_for_status()
                 
-                # Write content to file
                 with open(file_path, 'w', encoding='utf-8') as f:
                     f.write(response.text)
                 
-                downloaded_files.append(file_path)
-                st.success(f"✅ Downloaded {file_path}")
+                success_count += 1
+                st.success(f"✅ Successfully downloaded {file_path}")
                 
             except Exception as e:
                 st.error(f"❌ Failed to download {file_path}: {str(e)}")
                 return False
+        else:
+            success_count += 1
+            st.info(f"✅ {file_path} already exists")
     
-    return True
+    return success_count == len(vocab_files)
+
+def check_vocab_files():
+    """Check if vocabulary files are loaded correctly"""
+    try:
+        with open('trainingData/ur_vocab.txt', 'r', encoding='utf-8') as f:
+            ur_lines = f.readlines()
+        
+        with open('trainingData/en_vocab.txt', 'r', encoding='utf-8') as f:
+            en_lines = f.readlines()
+        
+        return True, len(ur_lines), len(en_lines)
+    except Exception as e:
+        st.error(f"Error reading vocab files: {e}")
+        return False, 0, 0
 
 def check_required_files():
     """Check if all required files exist"""
@@ -105,25 +165,45 @@ def check_required_files():
 def load_model():
     """Load the trained model with caching"""
     try:
-        # Download vocabulary files if they don't exist
-        if not os.path.exists('trainingData/ur_vocab.txt') or not os.path.exists('trainingData/en_vocab.txt'):
-            success = download_vocab_files()
-            if not success:
-                st.error("❌ Failed to download vocabulary files")
-                return None
+        # Download all required files
+        st.info("🚀 Setting up the transliteration model...")
         
-        # Check if model file exists
-        if not os.path.exists('best_model.pth'):
-            st.error("❌ Model file 'best_model.pth' not found!")
+        # Download model file
+        model_success = download_model_file()
+        if not model_success:
+            st.error("❌ Failed to download model file")
+            return None
+        
+        # Download vocabulary files
+        vocab_success = download_vocab_files()
+        if not vocab_success:
+            st.error("❌ Failed to setup vocabulary files")
+            return None
+        
+        # Check if all files exist
+        missing_files = check_required_files()
+        if missing_files:
+            st.error("❌ Still missing files after download:")
+            for file in missing_files:
+                st.write(f"- {file}")
+            return None
+        
+        # Verify vocab files can be read
+        vocab_ok, ur_size, en_size = check_vocab_files()
+        if vocab_ok:
+            st.success(f"✅ Vocabulary files loaded: Urdu({ur_size} chars), English({en_size} chars)")
+        else:
+            st.error("❌ Failed to read vocabulary files")
             return None
         
         # Load the model
-        model = TransliterationModel(
-            model_path="best_model.pth",
-            ur_vocab_path="trainingData/ur_vocab.txt",
-            en_vocab_path="trainingData/en_vocab.txt",
-            device='cuda' if torch.cuda.is_available() else 'cpu'
-        )
+        with st.spinner("🔄 Loading model into memory..."):
+            model = TransliterationModel(
+                model_path="best_model.pth",
+                ur_vocab_path="trainingData/ur_vocab.txt",
+                en_vocab_path="trainingData/en_vocab.txt",
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+            )
         
         st.success("✅ Model loaded successfully!")
         return model
@@ -136,33 +216,25 @@ def main():
     # Header
     st.markdown('<h1 class="main-header">🕌 Urdu to Roman Urdu Transliterator</h1>', unsafe_allow_html=True)
     
-    # Check for required files
+    # Check for required files and download if missing
     missing_files = check_required_files()
     
     if missing_files:
-        st.warning("⚠️ Some files are missing. Setting up...")
+        st.warning("⚠️ Some files are missing. Downloading automatically...")
         
-        # Download vocabulary files if missing
-        if any('trainingData' in file for file in missing_files):
-            st.info("🔄 Downloading vocabulary files from GitHub...")
-            download_vocab_files()
-        
-        # Check again after download attempt
-        missing_files = check_required_files()
-    
-    # Final check
-    if missing_files:
-        st.error("❌ Missing required files:")
+        # Show what's missing
+        st.write("**Missing files:**")
         for file in missing_files:
             st.write(f"- {file}")
         
-        if 'best_model.pth' in missing_files:
-            st.error("""
-            **Critical: best_model.pth is missing!**
-            
-            Please ensure you have the trained model file in the same directory as app.py
-            """)
-        return
+        # Download all missing files
+        load_model()
+        
+        # Check again after download attempt
+        missing_files = check_required_files()
+        if missing_files:
+            st.error("❌ Failed to download all required files. Please check your internet connection.")
+            return
     
     # Sidebar
     with st.sidebar:
@@ -190,17 +262,18 @@ def main():
         st.markdown("### ✅ File Status")
         st.success("All required files are present!")
         
-        # Show vocabulary info
+        # Vocabulary info
         try:
-            with open('trainingData/ur_vocab.txt', 'r', encoding='utf-8') as f:
-                ur_vocab_size = len(f.readlines())
-            with open('trainingData/en_vocab.txt', 'r', encoding='utf-8') as f:
-                en_vocab_size = len(f.readlines())
-            
-            st.write(f"**Urdu Vocab Size:** {ur_vocab_size}")
-            st.write(f"**English Vocab Size:** {en_vocab_size}")
+            vocab_ok, ur_size, en_size = check_vocab_files()
+            if vocab_ok:
+                st.write(f"**Urdu Vocab Size:** {ur_size}")
+                st.write(f"**English Vocab Size:** {en_size}")
+                
+                # Show file sizes
+                model_size = os.path.getsize('best_model.pth') / (1024 * 1024)
+                st.write(f"**Model Size:** {model_size:.1f} MB")
         except:
-            pass
+            st.write("**File info:** Unable to read")
 
     # Main content
     col1, col2 = st.columns([1, 1])
@@ -243,11 +316,10 @@ def main():
         """, unsafe_allow_html=True)
 
     # Load model
-    with st.spinner("🔄 Loading transliteration model..."):
-        model = load_model()
+    model = load_model()
     
     if model is None:
-        st.error("❌ Failed to load the model. Please check if 'best_model.pth' exists.")
+        st.error("❌ Failed to load the model. Please check the errors above.")
         return
 
     # Process transliteration when button is clicked
@@ -303,8 +375,8 @@ def main():
                 <div class="roman-text" style="font-size: 1rem;">{roman}</div>
             </div>
             """, unsafe_allow_html=True)
-    
-    # Test button in sidebar
+
+    # Quick test section
     with st.sidebar:
         st.markdown("---")
         if st.button("🧪 Quick Test", key="test_button"):
