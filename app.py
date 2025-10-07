@@ -2,7 +2,6 @@ import streamlit as st
 import torch
 from model import TransliterationModel
 import time
-import os
 
 # Page configuration
 st.set_page_config(
@@ -49,118 +48,27 @@ st.markdown("""
         font-family: 'Courier New', monospace;
         color: #d62728;
     }
-    .download-link {
-        background-color: #4CAF50;
-        color: white;
-        padding: 10px 15px;
-        text-decoration: none;
-        border-radius: 5px;
-        display: inline-block;
-        margin: 5px;
-    }
 </style>
 """, unsafe_allow_html=True)
-
-def check_required_files():
-    """Check if all required files exist"""
-    required_files = {
-        'Model file': 'best_model.pth',
-        'Urdu vocabulary': 'trainingData/ur_vocab.txt',
-        'English vocabulary': 'trainingData/en_vocab.txt'
-    }
-    
-    missing_files = []
-    for file_type, file_path in required_files.items():
-        if not os.path.exists(file_path):
-            missing_files.append((file_type, file_path))
-    
-    return missing_files
-
-def download_vocab_files():
-    """Provide instructions to download vocabulary files"""
-    st.markdown("### 📥 Download Required Files")
-    
-    st.markdown("""
-    Please download the following vocabulary files and place them in the `trainingData` directory:
-    """)
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("""
-        **Urdu Vocabulary:**
-        1. Click the link below
-        2. Right-click → "Save as"
-        3. Save as `trainingData/ur_vocab.txt`
-        """)
-        st.markdown(
-            '[Download ur_vocab.txt](https://raw.githubusercontent.com/Abdulbaset1/Urdu-to-Roman-Urdu-Translator/main/ur_vocab.txt)',
-            unsafe_allow_html=True
-        )
-    
-    with col2:
-        st.markdown("""
-        **English Vocabulary:**
-        1. Click the link below
-        2. Right-click → "Save as"
-        3. Save as `trainingData/en_vocab.txt`
-        """)
-        st.markdown(
-            '[Download en_vocab.txt](https://raw.githubusercontent.com/Abdulbaset1/Urdu-to-Roman-Urdu-Translator/main/en_vocab.txt)',
-            unsafe_allow_html=True
-        )
-    
-    st.markdown("""
-    ### 📁 Directory Structure
-    After downloading, your project should look like this:
-    ```
-    your_project/
-    ├── app.py
-    ├── model.py
-    ├── best_model.pth
-    └── trainingData/
-        ├── ur_vocab.txt
-        └── en_vocab.txt
-    ```
-    """)
 
 @st.cache_resource
 def load_model():
     """Load the trained model with caching"""
     try:
-        # Check if files exist first
-        missing_files = check_required_files()
-        if missing_files:
-            return None, missing_files
-        
         model = TransliterationModel(
             model_path="best_model.pth",
             ur_vocab_path="trainingData/ur_vocab.txt",
             en_vocab_path="trainingData/en_vocab.txt",
             device='cuda' if torch.cuda.is_available() else 'cpu'
         )
-        return model, []
+        return model
     except Exception as e:
         st.error(f"Error loading model: {e}")
-        return None, [("Model", f"Error: {str(e)}")]
+        return None
 
 def main():
     # Header
     st.markdown('<h1 class="main-header">🕌 Urdu to Roman Urdu Transliterator</h1>', unsafe_allow_html=True)
-    
-    # Check for missing files first
-    missing_files = check_required_files()
-    
-    if missing_files:
-        st.error("❌ Missing required files!")
-        st.markdown("The following files are required but not found:")
-        
-        for file_type, file_path in missing_files:
-            st.write(f"- **{file_type}**: `{file_path}`")
-        
-        st.markdown("---")
-        download_vocab_files()
-        return
     
     # Sidebar
     with st.sidebar:
@@ -183,10 +91,6 @@ def main():
         # Device info
         device = "GPU 🚀" if torch.cuda.is_available() else "CPU ⚙️"
         st.write(f"**Running on:** {device}")
-        
-        # File status
-        st.markdown("### ✅ File Status")
-        st.success("All required files are present!")
     
     # Main content
     col1, col2 = st.columns([1, 1])
@@ -228,14 +132,10 @@ def main():
     
     # Load model
     with st.spinner("🔄 Loading transliteration model..."):
-        model, load_errors = load_model()
+        model = load_model()
     
     if model is None:
-        st.error("❌ Failed to load the model.")
-        if load_errors:
-            st.markdown("**Errors encountered:**")
-            for error_type, error_msg in load_errors:
-                st.write(f"- {error_type}: {error_msg}")
+        st.error("❌ Failed to load the model. Please check if 'best_model.pth' and vocabulary files exist.")
         return
     
     # Process transliteration when button is clicked
